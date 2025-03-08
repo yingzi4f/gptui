@@ -2,73 +2,103 @@
   <div class="chat-layout">
     <!-- 侧边栏 -->
     <div class="sidebar">
-      <!-- 团队信息 -->
-      <div class="team-info">
-        <h3>
-          {{ userInfo.team?.name || '未分配团队' }}
-          <span v-if="isTeamLeader" class="leader-badge">组长</span>
-        </h3>
-        <!-- 添加清空按钮 -->
-        <el-button 
-          v-if="isTeamLeader"
-          type="danger" 
-          size="small"
-          @click="clearChatHistory">
-          清空会话
-        </el-button>
+      <!-- 用户信息 -->
+      <div class="user-info-header">
+        <div class="user-info">
+          <span class="username">{{ userInfo.username }}</span>
+          <span v-if="userInfo.isTeamLeader" class="leader-badge">组长</span>
+        </div>
+        <el-button type="text" @click="handleLogout">退出登录</el-button>
       </div>
 
-      <!-- 新建聊天按钮 -->
-      <div class="new-chat">
-        <el-button class="new-chat-btn" @click="startNewChat">
-          <el-icon><Plus /></el-icon>
-          新对话
-        </el-button>
+      <!-- 团队会话部分 -->
+      <div v-if="userInfo.team" class="chat-section">
+        <div class="team-info">
+          <h3>{{ userInfo.team.name }}</h3>
+        </div>
+        
+        <!-- 团队成员列表 -->
+        <div class="team-members">
+          <div class="section-title">团队成员</div>
+          <div v-for="member in teamMembers" 
+               :key="member.username" 
+               class="member-item">
+            <div class="member-info">
+              <span class="member-name">{{ member.username }}</span>
+              <span v-if="member.role === 'TEAM_LEADER'" 
+                    class="leader-badge">组长</span>
+            </div>
+            <el-button 
+              v-if="isTeamLeader && member.username !== userInfo.username"
+              type="danger" 
+              link 
+              size="small"
+              @click="removeTeamMember(member)">
+              移除
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 团队聊天入口 -->
+        <div class="team-chat-section">
+          <div class="section-title">
+            <span>团队聊天</span>
+            <el-button 
+              v-if="userInfo.isTeamLeader"
+              type="danger" 
+              link 
+              size="small"
+              @click.stop="clearTeamChat">
+              清空会话
+            </el-button>
+          </div>
+          <div class="history-item team-chat"
+               :class="{ active: currentSessionType === 'team' }"
+               @click="switchToTeamChat">
+            <el-icon><ChatRound /></el-icon>
+            <span class="chat-title">团队聊天室</span>
+          </div>
+        </div>
       </div>
 
-      <!-- 团队成员列表 -->
-      <div class="team-members">
-        <div class="section-title">团队成员</div>
-        <div v-for="member in teamMembers" 
-             :key="member.id" 
-             class="member-item">
-          <span class="member-name">
-            {{ member.username }}
-            <el-tag v-if="member.role === 'TEAM_LEADER'" 
-                    size="small" 
-                    type="warning">
-              组长
-            </el-tag>
-          </span>
+      <!-- 个人会话部分 -->
+      <div class="chat-section">
+        <div class="section-header">
+          <div class="section-title">个人会话</div>
           <el-button 
-            v-if="isTeamLeader && member.username !== userInfo.username"
-            type="danger" 
-            link 
-            size="small"
-            @click="removeTeamMember(member)">
-            移除
+            type="primary" 
+            size="small" 
+            @click="createAndOpenPersonalChat">
+            新建会话
           </el-button>
         </div>
-      </div>
-
-      <!-- 聊天历史记录 -->
-      <div class="chat-history">
-        <div v-for="chat in chatHistory" 
-             :key="chat.id" 
+        <div v-for="session in personalSessions" 
+             :key="session.sessionId" 
              class="history-item"
-             :class="{ active: currentChatId === chat.id }"
-             @click="switchChat(chat.id)">
+             @click="openPersonalChat(session.sessionId)">
           <el-icon><ChatRound /></el-icon>
-          <span class="chat-title">{{ getHistoryTitle(chat) }}</span>
+          <span class="chat-title">{{ session.name || '新会话' }}</span>
+          <div class="session-actions">
+            <el-button 
+              type="primary" 
+              link 
+              size="small"
+              @click.stop="showRenameDialog(session)">
+              重命名
+            </el-button>
+            <el-button 
+              type="danger" 
+              link 
+              size="small"
+              @click.stop="deletePersonalSession(session.sessionId)">
+              删除
+            </el-button>
+          </div>
         </div>
       </div>
 
-      <!-- 底部用户信息 -->
+      <!-- 底部模型选择器 -->
       <div class="sidebar-footer">
-        <div class="user-info">
-          <span>{{ userInfo.username }}</span>
-          <el-button type="text" @click="handleLogout">退出登录</el-button>
-        </div>
         <div class="model-selector">
           <el-select v-model="currentModel" class="model-select">
             <el-option
@@ -152,6 +182,24 @@
         </div>
       </div>
     </div>
+
+    <!-- 添加重命名对话框 -->
+    <el-dialog
+      v-model="renameDialogVisible"
+      title="重命名会话"
+      width="30%">
+      <el-input 
+        v-model="newSessionName"
+        placeholder="请输入新的会话名称"
+        @keyup.enter="handleRename"
+      />
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="renameDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleRename">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -198,39 +246,121 @@ const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleString()
 }
 
-// 添加自动刷新相关的变量和函数
-const refreshInterval = ref(null)
-const lastMessageId = ref(0)
-const isTyping = ref(false)
+// 添加自动刷新相关的状态
+const autoRefreshInterval = ref(null)
+const lastMessageTimestamp = ref(0)
 
 // 添加团队成员相关的状态
 const teamMembers = ref([])
-const isTeamLeader = computed(() => userInfo.value.role === 'TEAM_LEADER')
+const isTeamLeader = computed(() => {
+  return userInfo.value.isTeamLeader
+})
 
-// 修改获取历史记录函数
-const fetchChatHistory = async (silent = false) => {
-  if (!userInfo.value.team?.sessionId) {
-    messages.value = []
-    return
-  }
-  
+// 添加状态管理
+const userSessions = ref([])
+const currentSessionId = ref('')
+
+// 添加个人会话和团队会话的状态管理
+const personalSessions = ref([])
+const teamSessions = ref([])
+const currentSessionType = ref('team') // 'team' 或 'personal'
+
+// 获取用户的所有会话列表
+const fetchUserSessions = async () => {
   try {
-    const response = await fetch(`/api/chat/history/${userInfo.value.team.sessionId}`)
+    const response = await fetch(`/api/chat/sessions/${userInfo.value.username}`)
     if (response.ok) {
       const data = await response.json()
-      const sortedData = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-      
-      // 更新消息列表
-      messages.value = sortedData
-      lastMessageId.value = Math.max(...sortedData.map(msg => msg.id))
-      
-      if (!silent) {
-        await scrollToBottom()
-      }
+      userSessions.value = data
+    }
+  } catch (error) {
+    console.error('获取会话列表失败:', error)
+  }
+}
+
+// 获取特定会话的聊天记录
+const fetchChatHistory = async (sessionId) => {
+  try {
+    const response = await fetch(`/api/chat/history/${userInfo.value.username}/${sessionId}`)
+    if (response.ok) {
+      const data = await response.json()
+      messages.value = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      await scrollToBottom()
     }
   } catch (error) {
     console.error('获取聊天记录失败:', error)
   }
+}
+
+// 获取团队会话历史记录
+const fetchTeamChatHistory = async () => {
+  if (!userInfo.value.team?.sessionId) return
+  
+  try {
+    const response = await fetch(`/api/team-chat/history//${userInfo.value.team.sessionId}`)
+    if (response.ok) {
+      const data = await response.json()
+      messages.value = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      await scrollToBottom()
+    }
+  } catch (error) {
+    console.error('获取团队聊天记录失败:', error)
+  }
+}
+
+// 切换会话
+const switchSession = async (sessionId) => {
+  currentSessionId.value = sessionId
+  await fetchChatHistory(sessionId)
+}
+
+// 切换到团队会话
+const switchToTeamChat = async () => {
+  currentSessionType.value = 'team'
+  try {
+    const response = await fetch(`/api/team-chat/history/${userInfo.value.username}/${userInfo.value.team.sessionId}`)
+    if (response.ok) {
+      const data = await response.json()
+      messages.value = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      
+      // 更新最新消息时间戳
+      if (messages.value.length > 0) {
+        lastMessageTimestamp.value = new Date(messages.value[messages.value.length - 1].createdAt).getTime()
+      }
+      
+      await scrollToBottom()
+      // 启动自动刷新
+      startAutoRefresh()
+    }
+  } catch (error) {
+    console.error('获取团队聊天记录失败:', error)
+  }
+}
+
+// 删除会话
+const deleteSession = async (sessionId) => {
+  try {
+    const response = await fetch(`/api/chat/history/${userInfo.value.username}/${sessionId}`, {
+      method: 'DELETE'
+    })
+    if (response.ok) {
+      ElMessage.success('会话已删除')
+      if (currentSessionId.value === sessionId) {
+        messages.value = []
+        currentSessionId.value = ''
+      }
+      await fetchUserSessions()
+    }
+  } catch (error) {
+    console.error('删除会话失败:', error)
+    ElMessage.error('删除会话失败')
+  }
+}
+
+// 开始新对话
+const startNewChat = () => {
+  currentSessionId.value = ''  // 清空当前会话ID
+  messages.value = []         // 清空消息列表
 }
 
 // 获取模型列表并设置默认模型
@@ -259,22 +389,128 @@ watch(currentModel, (newModel) => {
   }
 })
 
-// 修改发送消息函数
-const sendMessage = async () => {
-  if (!userInfo.value.team?.sessionId) {
-    ElMessage.warning('管理员不能发送消息')
+// 获取团队会话列表
+const fetchTeamSessions = async () => {
+  if (!userInfo.value.username) return
+  
+  try {
+    const response = await fetch(`/api/team-chat/sessions/${userInfo.value.username}`)
+    if (response.ok) {
+      const data = await response.json()
+      teamSessions.value = data
+    }
+  } catch (error) {
+    console.error('获取团队会话列表失败:', error)
+  }
+}
+
+// 获取个人会话列表
+const fetchPersonalSessions = async () => {
+  try {
+    const response = await fetch(`/api/personal-chat/sessions/${userInfo.value.username}`)
+    if (response.ok) {
+      const data = await response.json()
+      personalSessions.value = data
+    }
+  } catch (error) {
+    console.error('获取个人会话列表失败:', error)
+  }
+}
+
+// 创建新的个人会话
+const createPersonalSession = async () => {
+  try {
+    const response = await fetch(`/api/personal-chat/sessions?username=${userInfo.value.username}`, {
+      method: 'POST'
+    })
+    if (response.ok) {
+      const data = await response.json()
+      await fetchPersonalSessions()
+      return data.sessionId
+    }
+  } catch (error) {
+    console.error('创建个人会话失败:', error)
+    ElMessage.error('创建个人会话失败')
+  }
+}
+
+// 删除个人会话
+const deletePersonalSession = async (sessionId) => {
+  try {
+    const response = await fetch(`/api/personal-chat/sessions/${userInfo.value.username}/${sessionId}`, {
+      method: 'DELETE'
+    })
+    if (response.ok) {
+      ElMessage.success('会话已删除')
+      await fetchPersonalSessions()
+    }
+  } catch (error) {
+    console.error('删除会话失败:', error)
+    ElMessage.error('删除会话失败')
+  }
+}
+
+// 更新个人会话名称
+const updateSessionName = async (sessionId, newName) => {
+  try {
+    const response = await fetch(
+      `/api/personal-chat/sessions/${userInfo.value.username}/${sessionId}/name?name=${encodeURIComponent(newName)}`,
+      { method: 'PUT' }
+    )
+    if (response.ok) {
+      ElMessage.success('会话名称已更新')
+      await fetchPersonalSessions()
+    }
+  } catch (error) {
+    console.error('更新会话名称失败:', error)
+    ElMessage.error('更新会话名称失败')
+  }
+}
+
+// 打开个人会话窗口
+const openPersonalChat = (sessionId) => {
+  const route = {
+    name: 'PersonalChat',
+    params: { sessionId },
+    query: { username: userInfo.value.username }
+  }
+  window.open(router.resolve(route).href, '_blank')
+}
+
+// 修改获取团队成员的函数
+const fetchTeamMembers = async () => {
+  // 确保有团队ID
+  if (!userInfo.value.team?.id) {
+    console.log('No team ID found')
     return
   }
+  
+  try {
+    console.log('Fetching team members for team:', userInfo.value.team.id)
+    const response = await fetch(`/api/teams/${userInfo.value.team.id}/members`)
+    if (response.ok) {
+      const data = await response.json()
+      console.log('Team members:', data)
+      teamMembers.value = data
+    } else {
+      throw new Error('获取团队成员失败')
+    }
+  } catch (error) {
+    console.error('获取团队成员失败:', error)
+    ElMessage.error('获取团队成员失败')
+  }
+}
 
+// 修改发送消息函数
+const sendMessage = async () => {
   if (!userInput.value.trim()) return
 
   const userMessage = userInput.value
   userInput.value = ''
 
-  // 添加临时消息到界面
+  // 添加用户消息到界面
   const tempUserMessage = {
     id: Date.now(),
-    sessionId: userInfo.value.team?.sessionId,
     role: 'user',
     content: userMessage,
     username: userInfo.value.username,
@@ -283,10 +519,8 @@ const sendMessage = async () => {
   }
   messages.value.push(tempUserMessage)
 
-  // 添加临时的AI响应消息
   const tempAiMessage = {
     id: Date.now() + 1,
-    sessionId: userInfo.value.team?.sessionId,
     role: 'assistant',
     content: '',
     username: userInfo.value.username,
@@ -298,26 +532,56 @@ const sendMessage = async () => {
   await scrollToBottom()
 
   try {
-    // 创建 EventSource 实例
-    const source = new EventSource(
-      `/api/chat/stream?sessionId=${userInfo.value.team?.sessionId}&modelName=${currentModel.value}&content=${encodeURIComponent(userMessage)}&username=${encodeURIComponent(userInfo.value.username)}`
-    )
+    // 构建请求体
+    const requestBody = {
+      username: userInfo.value.username,
+      sessionId: userInfo.value.team.sessionId, // 使用团队的sessionId
+      modelName: currentModel.value,
+      content: userMessage
+    }
 
-    source.onmessage = async (event) => {
+    console.log('Sending message:', requestBody)
+
+    const response = await fetch('/api/team-chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    })
+
+    if (!response.ok) {
+      throw new Error('发送消息失败')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+
       try {
-        const jsonData = JSON.parse(event.data)
-        if (Array.isArray(jsonData)) {
-          const messageContent = jsonData.find(item => 
-            item.mediaType === null && 
-            item.data && 
-            !item.data.includes('id:') && 
-            !item.data.includes('event:')
-          )
-          
-          if (messageContent) {
-            tempAiMessage.content += messageContent.data
-            await nextTick()
-            await scrollToBottom()
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+        
+        for (const line of lines) {
+          if (line.trim()) {
+            const jsonData = JSON.parse(line)
+            if (Array.isArray(jsonData)) {
+              const messageContent = jsonData.find(item => 
+                item.mediaType === null && 
+                item.data && 
+                !item.data.includes('id:') && 
+                !item.data.includes('event:')
+              )
+              
+              if (messageContent) {
+                tempAiMessage.content += messageContent.data
+                await nextTick()
+                await scrollToBottom()
+              }
+            }
           }
         }
       } catch (error) {
@@ -325,14 +589,10 @@ const sendMessage = async () => {
       }
     }
 
-    source.onerror = async () => {
-      source.close()
-      // 流结束后，从服务器获取完整的对话记录
-      await fetchChatHistory()
-    }
+    // 消息发送完成后更新历史记录
+    await fetchTeamChatHistory()
   } catch (error) {
     console.error('发送消息失败:', error)
-    // 移除临时消息
     messages.value = messages.value.filter(msg => msg.id !== tempAiMessage.id)
     ElMessage.error('发送消息失败')
   }
@@ -354,21 +614,45 @@ const handleLogout = () => {
   router.push('/login')
 }
 
-// 添加开始自动刷新函数
+// 自动刷新团队消息
 const startAutoRefresh = () => {
-  stopAutoRefresh() // 确保不会重复启动
-  refreshInterval.value = setInterval(() => {
-    if (!isTyping.value) { // 只在用户不输入时刷新
-      fetchChatHistory(true)
+  // 清除可能存在的旧定时器
+  if (autoRefreshInterval.value) {
+    clearInterval(autoRefreshInterval.value)
+  }
+
+  // 每3秒检查一次新消息
+  autoRefreshInterval.value = setInterval(async () => {
+    if (currentSessionType.value === 'team' && userInfo.value.team?.sessionId) {
+      try {
+        const response = await fetch(`/api/team-chat/history/${userInfo.value.username}/${userInfo.value.team.sessionId}`)
+        if (response.ok) {
+          const data = await response.json()
+          
+          // 检查是否有新消息
+          const latestMessages = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+          const latestTimestamp = latestMessages.length > 0 
+            ? new Date(latestMessages[latestMessages.length - 1].createdAt).getTime()
+            : 0
+
+          if (latestTimestamp > lastMessageTimestamp.value) {
+            messages.value = latestMessages
+            lastMessageTimestamp.value = latestTimestamp
+            await scrollToBottom()
+          }
+        }
+      } catch (error) {
+        console.error('自动刷新消息失败:', error)
+      }
     }
-  }, 3000) // 每10秒刷新一次
+  }, 3000)
 }
 
-// 添加停止自动刷新函数
+// 停止自动刷新
 const stopAutoRefresh = () => {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value)
-    refreshInterval.value = null
+  if (autoRefreshInterval.value) {
+    clearInterval(autoRefreshInterval.value)
+    autoRefreshInterval.value = null
   }
 }
 
@@ -381,42 +665,36 @@ const handleInputBlur = () => {
   isTyping.value = false
 }
 
-// 添加获取团队成员的函数
-const fetchTeamMembers = async () => {
-  if (!userInfo.value.team?.id) {
-    teamMembers.value = []
-    return
-  }
-  
+// 添加获取用户团队信息的函数
+const fetchUserTeamInfo = async () => {
   try {
-    const response = await fetch(`/api/teams/${userInfo.value.team.id}/members`)
+    const response = await fetch(`/api/teams/user/${userInfo.value.username}`)
     if (response.ok) {
       const data = await response.json()
-      teamMembers.value = data
-    } else {
-      throw new Error('获取团队成员失败')
+      if (data) {
+        userInfo.value.team = data
+        // 如果用户属于团队，自动加载团队会话
+        if (data.sessionId) {
+          currentSessionId.value = data.sessionId
+          currentSessionType.value = 'team'
+          await fetchTeamChatHistory()
+        }
+      }
     }
   } catch (error) {
-    console.error('获取团队成员失败:', error)
-    ElMessage.error(error.message || '获取团队成员失败')
+    console.error('获取用户团队信息失败:', error)
   }
 }
 
-// 添加移除团队成员的函数
+// 移除团队成员
 const removeTeamMember = async (member) => {
   try {
-    const response = await fetch(`/api/users/${member.username}/teams/${userInfo.value.team.id}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        username: "admin"
-      })
+    const response = await fetch(`/api/teams/${userInfo.value.team.id}/members/${member.username}`, {
+      method: 'DELETE'
     })
     
     if (response.ok) {
-      ElMessage.success(`已将 ${member.username} 移出团队`)
+      ElMessage.success('成员已移除')
       await fetchTeamMembers()
     } else {
       throw new Error('移除成员失败')
@@ -481,11 +759,113 @@ const clearChatHistory = async () => {
   }
 }
 
-onMounted(() => {
-  fetchChatHistory()
-  fetchModels()
-  startAutoRefresh()
-  fetchTeamMembers()
+// 添加创建并打开新会话的函数
+const createAndOpenPersonalChat = async () => {
+  try {
+    const sessionId = await createPersonalSession()
+    if (sessionId) {
+      openPersonalChat(sessionId)
+    }
+  } catch (error) {
+    console.error('创建新会话失败:', error)
+    ElMessage.error('创建新会话失败')
+  }
+}
+
+// 添加重命名对话框
+const renameDialogVisible = ref(false)
+const newSessionName = ref('')
+const currentSession = ref(null)
+
+// 显示重命名对话框
+const showRenameDialog = (session) => {
+  currentSession.value = session
+  newSessionName.value = session.name || ''
+  renameDialogVisible.value = true
+}
+
+// 执行重命名操作
+const handleRename = async () => {
+  if (!newSessionName.value.trim()) {
+    ElMessage.warning('请输入会话名称')
+    return
+  }
+
+  await updateSessionName(currentSession.value.sessionId, newSessionName.value.trim())
+  renameDialogVisible.value = false
+}
+
+// 监听会话类型变化
+watch(currentSessionType, (newType) => {
+  if (newType === 'team') {
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+})
+
+// 添加清空团队会话的函数
+const clearTeamChat = async () => {
+  if (!userInfo.value.isTeamLeader || !userInfo.value.team?.sessionId) {
+    ElMessage.warning('只有团队组长可以清空会话')
+    return
+  }
+
+  try {
+    // 第一次确认
+    await ElMessageBox.confirm(
+      '是否清空团队会话记录？',
+      '警告',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    // 第二次确认
+    await ElMessageBox.confirm(
+      '此操作将永久删除所有聊天记录，是否继续？',
+      '危险操作',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'danger'
+      }
+    )
+
+    const response = await fetch(
+      `/api/team-chat/clear/${userInfo.value.team.sessionId}?username=${userInfo.value.username}`,
+      { method: 'DELETE' }
+    )
+
+    if (response.ok) {
+      ElMessage.success('会话记录已清空')
+      messages.value = []
+    } else {
+      throw new Error('清空会话记录失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('清空会话记录失败:', error)
+      ElMessage.error(error.message || '清空会话记录失败')
+    }
+  }
+}
+
+onMounted(async () => {
+  console.log('User info:', userInfo.value)
+  if (userInfo.value.team?.id) {
+    await fetchTeamMembers()
+    // 如果是团队会话，启动自动刷新
+    if (currentSessionType.value === 'team') {
+      startAutoRefresh()
+    }
+  }
+  await Promise.all([
+    fetchModels(),
+    fetchTeamChatHistory()
+  ])
 })
 
 onUnmounted(() => {
@@ -494,37 +874,78 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 添加团队信息样式 */
-.team-info {
-  padding: 16px;
-  border-bottom: 1px solid #4b5563;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.team-info h3 {
-  color: #fff;
-  margin: 0;
-  font-size: 16px;
+/* 用户信息样式 */
+.user-info {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* 清空按钮样式 */
-.team-info .el-button--danger {
-  background-color: transparent;
-  border-color: #f56c6c;
-  color: #f56c6c;
+/* 团队信息样式 */
+.team-info {
+  padding: 16px;
+  border-bottom: 1px solid #2d4a77;
 }
 
-.team-info .el-button--danger:hover {
-  background-color: #f56c6c;
-  color: #fff;
+.team-info h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #ffffff;
 }
 
-/* 其他现有样式保持不变 */
+/* 团队成员样式 */
+.team-members {
+  padding: 16px;
+  border-bottom: 1px solid #2d4a77;
+}
+
+.member-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.member-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-name {
+  font-size: 14px;
+}
+
+.leader-badge {
+  background-color: #ffd700;
+  color: #1a365d;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* 团队聊天部分样式 */
+.team-chat-section {
+  padding: 16px;
+  border-bottom: 1px solid #2d4a77;
+}
+
+.team-chat {
+  background-color: rgba(45, 74, 119, 0.3);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.team-chat:hover {
+  background-color: rgba(45, 74, 119, 0.5);
+}
+
+.team-chat.active {
+  background-color: rgba(45, 74, 119, 0.7);
+}
+
+/* 其他样式保持不变 */
 .chat-layout {
   display: flex;
   height: 100vh;
@@ -593,13 +1014,6 @@ onUnmounted(() => {
 .sidebar-footer {
   padding: 8px;
   border-top: 1px solid #4b5563;
-}
-
-.user-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
 }
 
 .model-selector {
@@ -910,41 +1324,45 @@ onUnmounted(() => {
 }
 
 /* 修改侧边栏，添加团队成员列表 */
-.team-members {
-  padding: 16px;
-  border-top: 1px solid #022555;
-  border-bottom: 1px solid #06377a;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 16px;
-}
-
-.member-item {
+.section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
+  padding: 0 8px;
+  margin-bottom: 8px;
 }
 
-.member-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.session-actions {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
-.leader-badge {
-  background-color: #ffd700;
-  color: #000;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+.history-item:hover .session-actions {
+  opacity: 1;
 }
 
-.el-tag {
-  margin-left: 8px;
+/* 修改团队聊天标题样式 */
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.section-title .el-button {
+  font-size: 12px;
+  padding: 2px 8px;
+  height: auto;
+  color: #ff4d4f;
+}
+
+.section-title .el-button:hover {
+  color: #ff7875;
+  background-color: rgba(255, 77, 79, 0.1);
 }
 </style> 

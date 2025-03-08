@@ -22,6 +22,12 @@ const routes = [
     name: 'Admin',
     component: () => import('../views/AdminView.vue'),
     meta: { requiresAuth: true, role: 'ADMIN' }
+  },
+  {
+    path: '/personal-chat/:sessionId',
+    name: 'PersonalChat',
+    component: () => import('../views/PersonalChatView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 

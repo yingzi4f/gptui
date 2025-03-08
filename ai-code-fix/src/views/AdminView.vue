@@ -175,25 +175,32 @@
 
           <!-- 会话管理 -->
           <div v-show="activeMenu === 'chats'">
+            <div class="action-bar">
+              <el-button 
+                type="danger" 
+                @click="clearChatHistory(null, null)">
+                清空所有团队会话
+              </el-button>
+            </div>
+            
             <el-card>
               <el-table :data="teams" style="width: 100%">
-                <el-table-column prop="name" label="团队名称" />
-                <el-table-column label="会话ID">
+                <el-table-column prop="name" label="团队名称">
                   <template #default="scope">
                     <el-button 
-                      type="primary" 
-                      link
-                      @click="showChatHistory(scope.row.sessionId)">
-                      {{ scope.row.sessionId }}
+                      type="text" 
+                      @click="showChatHistory(scope.row.id, scope.row.name)">
+                      {{ scope.row.name }}
                     </el-button>
                   </template>
                 </el-table-column>
+                <el-table-column prop="sessionId" label="会话ID" />
                 <el-table-column fixed="right" label="操作" width="120">
                   <template #default="scope">
                     <el-button 
                       type="danger" 
                       link
-                      @click="clearChatHistory(scope.row.sessionId, scope.row.name)">
+                      @click="clearChatHistory(scope.row.id, scope.row.name)">
                       清空会话
                     </el-button>
                   </template>
@@ -383,14 +390,14 @@ const users = ref([])
 const models = ref([])
 
 // 表单
-const teamForm = ref({
+const teamForm = reactive({
   teamName: '',
   username: ''
 })
 
-const assignForm = ref({
-  teamName: '',
+const assignForm = reactive({
   username: '',
+  teamName: '',
   targetUsername: ''
 })
 
@@ -436,6 +443,9 @@ const localModels = ref([])
 const chatHistoryVisible = ref(false)
 const currentSessionId = ref('')
 const chatMessages = ref([])
+
+// 添加新的状态
+const teamChatHistories = ref([])
 
 // 配置 marked
 marked.setOptions({
@@ -495,7 +505,7 @@ const addUser = async () => {
 // 获取团队列表
 const fetchTeams = async () => {
   try {
-    const response = await fetch('/api/teams')
+    const response = await fetch('/api/teams/list')
     if (response.ok) {
       const data = await response.json()
       teams.value = data
@@ -532,64 +542,76 @@ const fetchModels = async () => {
 
 // 创建团队
 const createTeam = async () => {
+  if (!teamForm.teamName.trim()) {
+    ElMessage.warning('请输入团队名称')
+    return
+  }
+
   try {
-    const response = await fetch('/api/teams', {
+    const response = await fetch('/api/teams/create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        teamName: teamForm.value.teamName,
-        username: userInfo.value.username
+        teamName: teamForm.teamName.trim(),
+        username: 'admin'
       })
     })
-    
+
     if (response.ok) {
       ElMessage.success('创建团队成功')
       dialogVisible.value = false
-      teamForm.value.teamName = ''
+      teamForm.teamName = ''
       await fetchTeams()
     } else {
-      ElMessage.error('创建团队失败')
+      throw new Error('创建团队失败')
     }
   } catch (error) {
-    ElMessage.error('网络错误，请稍后重试')
+    console.error('创建团队失败:', error)
+    ElMessage.error(error.message || '创建团队失败')
   }
 }
 
 // 显示添加用户对话框
 const showAssignUserDialog = (team) => {
-  assignForm.value.teamName = team.name
-  assignForm.value.username = userInfo.value.username
-  assignForm.value.targetUsername = ''
+  currentTeam.value = team
+  assignForm.teamName = team.name
+  assignForm.targetUsername = ''
   assignDialogVisible.value = true
 }
 
 // 添加用户到团队
 const assignUserToTeam = async () => {
-  if (!assignForm.value.targetUsername) {
+  if (!assignForm.targetUsername) {
     ElMessage.warning('请选择要添加的用户')
     return
   }
 
   try {
-    const response = await fetch('/api/teams/assign', {
-      method: 'PUT',
+    const response = await fetch('/api/teams/add', {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(assignForm.value)
+      body: JSON.stringify({
+        username: 'admin',
+        teamName: currentTeam.value.name,
+        targetUsername: assignForm.targetUsername
+      })
     })
-    
+
     if (response.ok) {
       ElMessage.success('添加成员成功')
       assignDialogVisible.value = false
-      await fetchUsers() // 刷新用户列表
+      assignForm.targetUsername = ''
+      await showTeamMembers(currentTeam.value)
     } else {
-      ElMessage.error('添加成员失败')
+      throw new Error('添加成员失败')
     }
   } catch (error) {
-    ElMessage.error('网络错误，请稍后重试')
+    console.error('添加成员失败:', error)
+    ElMessage.error(error.message || '添加成员失败')
   }
 }
 
@@ -739,16 +761,22 @@ const setTeamLeader = async (user) => {
   }
 }
 
-// 添加查看会话记录的函数
-const showChatHistory = async (sessionId) => {
-  currentSessionId.value = sessionId
-  chatHistoryVisible.value = true
-  
+// 修改获取会话记录的函数
+const showChatHistory = async (teamId, teamName) => {
   try {
-    const response = await fetch(`/api/chat/history/${sessionId}`)
+    const response = await fetch(`/api/admin/chat-history/all?username=admin`)
     if (response.ok) {
       const data = await response.json()
-      chatMessages.value = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      // 找到对应团队的聊天记录
+      const teamHistory = data.find(history => history.teamId === teamId)
+      if (teamHistory) {
+        chatMessages.value = teamHistory.messages.sort((a, b) => 
+          new Date(a.createdAt) - new Date(b.createdAt)
+        )
+        chatHistoryVisible.value = true
+      } else {
+        ElMessage.warning('该团队暂无聊天记录')
+      }
     } else {
       throw new Error('获取会话记录失败')
     }
@@ -758,13 +786,13 @@ const showChatHistory = async (sessionId) => {
   }
 }
 
-// 添加清空会话的函数
-const clearChatHistory = async (sessionId, teamName) => {
+// 修改清空会话记录的函数
+const clearChatHistory = async (teamId, teamName) => {
   try {
     // 第一次确认
-    const firstConfirm = await ElMessageBox.confirm(
-      `是否删除 ${teamName} 的会话记录？`,
-      '提示',
+    await ElMessageBox.confirm(
+      teamId ? `是否清空 ${teamName} 的会话记录？` : '是否清空所有团队的会话记录？',
+      '警告',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -772,42 +800,43 @@ const clearChatHistory = async (sessionId, teamName) => {
       }
     )
     
-    if (firstConfirm === 'confirm') {
-      // 第二次确认
-      const secondConfirm = await ElMessageBox.confirm(
-        '真的要删除吗，删除将清空所有数据',
-        '警告',
-        {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'danger'
-        }
-      )
-      
-      if (secondConfirm === 'confirm') {
-        const response = await fetch('/api/chat/clear-history', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            sessionId: sessionId
-          })
-        })
-        
-        if (response.ok) {
-          ElMessage.success('会话记录已清空')
-          chatHistoryVisible.value = false
-          chatMessages.value = []
-        } else {
-          throw new Error('清空会话失败')
-        }
+    // 第二次确认，使用更强烈的警告
+    await ElMessageBox.confirm(
+      teamId ? 
+        '此操作将永久删除该团队的所有聊天记录，是否继续？' : 
+        '此操作将永久删除所有团队的聊天记录，此操作不可恢复，是否继续？',
+      '危险操作',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'danger'
       }
+    )
+
+    // 根据是否有teamId选择不同的接口
+    const url = teamId ?
+      `/api/admin/chat-history/clear/${teamId}?username=admin` :
+      '/api/admin/chat-history/clear-all?username=admin'
+    
+    const response = await fetch(url, {
+      method: 'DELETE'
+    })
+    
+    if (response.ok) {
+      ElMessage.success(teamId ? '该团队会话记录已清空' : '所有团队会话记录已清空')
+      chatHistoryVisible.value = false
+      chatMessages.value = []
+      // 重新获取聊天记录
+      if (teamId) {
+        await showChatHistory(teamId, teamName)
+      }
+    } else {
+      throw new Error('清空会话记录失败')
     }
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('清空会话失败:', error)
-      ElMessage.error(error.message || '清空会话失败')
+      console.error('清空会话记录失败:', error)
+      ElMessage.error(error.message || '清空会话记录失败')
     }
   }
 }
