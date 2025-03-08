@@ -159,12 +159,17 @@ const fetchModels = async () => {
   try {
     const response = await fetch('/api/models')
     const data = await response.json()
+    models.value = data
+    
+    // 获取上次选择的模型
     const savedModel = localStorage.getItem(LOCAL_STORAGE_MODEL_KEY)
-    currentModel.value = savedModel && data.some(model => model.name === savedModel)
-      ? savedModel
-      : data[0]?.name
+    if (savedModel && data.some(model => model.name === savedModel)) {
+      currentModel.value = savedModel
+    } else if (data.length > 0) {
+      currentModel.value = data[0].name
+    }
   } catch (error) {
-    console.error('获取模型列表失败:', error)
+    ElMessage.error('获取模型列表失败')
   }
 }
 
