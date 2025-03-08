@@ -555,7 +555,7 @@ const createTeam = async () => {
       },
       body: JSON.stringify({
         teamName: teamForm.teamName.trim(),
-        username: 'admin'
+        username: userInfo.value.username
       })
     })
 
@@ -595,7 +595,7 @@ const assignUserToTeam = async () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        username: 'admin',
+        username: userInfo.value.username,
         teamName: currentTeam.value.name,
         targetUsername: assignForm.targetUsername
       })
@@ -764,7 +764,8 @@ const setTeamLeader = async (user) => {
 // 修改获取会话记录的函数
 const showChatHistory = async (teamId, teamName) => {
   try {
-    const response = await fetch(`/api/admin/chat-history/all?username=admin`)
+    const admininfo = userInfo.value.username
+    const response = await fetch(`/api/admin/chat-history/all?username=${admininfo}`)
     if (response.ok) {
       const data = await response.json()
       // 找到对应团队的聊天记录

@@ -42,16 +42,17 @@
         <!-- 团队聊天入口 -->
         <div class="team-chat-section">
           <div class="section-title">
-            <span>团队聊天</span>
-            <el-button 
-              v-if="userInfo.isTeamLeader"
-              type="danger" 
-              link 
-              size="small"
-              @click.stop="clearTeamChat">
-              清空会话
-            </el-button>
-          </div>
+    <span>团队聊天</span>
+    <el-button
+      v-if="userInfo.role === 'TEAM_LEADER'"
+      type="danger"
+      link
+      size="small"
+      @click.stop="clearTeamChat"
+    >
+      清空会话
+    </el-button>
+  </div>
           <div class="history-item team-chat"
                :class="{ active: currentSessionType === 'team' }"
                @click="switchToTeamChat">
@@ -318,7 +319,7 @@ const switchSession = async (sessionId) => {
 const switchToTeamChat = async () => {
   currentSessionType.value = 'team'
   try {
-    const response = await fetch(`/api/team-chat/history/${userInfo.value.username}/${userInfo.value.team.sessionId}`)
+    const response = await fetch(`/api/team-chat/history//${userInfo.value.team.sessionId}`)
     if (response.ok) {
       const data = await response.json()
       messages.value = data.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
@@ -625,7 +626,7 @@ const startAutoRefresh = () => {
   autoRefreshInterval.value = setInterval(async () => {
     if (currentSessionType.value === 'team' && userInfo.value.team?.sessionId) {
       try {
-        const response = await fetch(`/api/team-chat/history/${userInfo.value.username}/${userInfo.value.team.sessionId}`)
+        const response = await fetch(`/api/team-chat/history/${userInfo.value.team.sessionId}`)
         if (response.ok) {
           const data = await response.json()
           
@@ -806,7 +807,7 @@ watch(currentSessionType, (newType) => {
 
 // 添加清空团队会话的函数
 const clearTeamChat = async () => {
-  if (!userInfo.value.isTeamLeader || !userInfo.value.team?.sessionId) {
+  if (!userInfo.value.role=='TEAM_LEADER' || !userInfo.value.team?.sessionId) {
     ElMessage.warning('只有团队组长可以清空会话')
     return
   }
