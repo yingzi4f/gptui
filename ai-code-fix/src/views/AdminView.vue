@@ -150,8 +150,11 @@
           <!-- 模型管理 -->
           <div v-show="activeMenu === 'models'">
             <div class="action-bar">
-              <el-button type="primary" @click="showAddModelDialog">
-                添加模型
+              <el-button type="primary" @click="showAddQwenModelDialog">
+                添加千问模型
+              </el-button>
+              <el-button type="primary" @click="addModelDialogVisible = true" style="margin-left: 10px;">
+                导入本地模型
               </el-button>
             </div>
             
@@ -354,6 +357,25 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 千问模型添加弹窗 -->
+    <el-dialog
+      v-model="addQwenModelDialogVisible"
+      title="添加千问模型"
+      width="400px">
+      <el-form :model="qwenModelForm" :rules="qwenModelRules" ref="qwenModelFormRef">
+        <el-form-item label="模型名称" prop="name">
+          <el-input v-model="qwenModelForm.name" placeholder="如 qwen-turbo" />
+        </el-form-item>
+        <el-form-item label="API-KEY" prop="apiKey">
+          <el-input v-model="qwenModelForm.apiKey" placeholder="请输入API-KEY" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addQwenModelDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleAddQwenModel">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -383,6 +405,15 @@ const dialogVisible = ref(false)
 const assignDialogVisible = ref(false)
 const addUserDialogVisible = ref(false)
 const addModelDialogVisible = ref(false)
+
+// 千问模型添加弹窗相关
+const addQwenModelDialogVisible = ref(false)
+const qwenModelFormRef = ref(null)
+const qwenModelForm = reactive({ name: '', apiKey: '' })
+const qwenModelRules = {
+  name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+  apiKey: [{ required: true, message: '请输入API-KEY', trigger: 'blur' }]
+}
 
 // 数据
 const teams = ref([])
@@ -531,12 +562,9 @@ const fetchUsers = async () => {
 
 // 获取模型列表
 const fetchModels = async () => {
-  try {
-    const response = await fetch('/api/models')
-    const data = await response.json()
-    models.value = data
-  } catch (error) {
-    ElMessage.error('获取模型列表失败')
+  const res = await fetch('/api/models')
+  if (res.ok) {
+    models.value = await res.json()
   }
 }
 
@@ -845,6 +873,33 @@ const clearChatHistory = async (teamId, teamName) => {
 const handleLogout = () => {
   localStorage.removeItem('userInfo')
   router.push('/login')
+}
+
+// 显示千问模型添加对话框
+const showAddQwenModelDialog = () => {
+  qwenModelForm.name = ''
+  qwenModelForm.apiKey = ''
+  addQwenModelDialogVisible.value = true
+}
+
+// 处理千问模型添加
+const handleAddQwenModel = async () => {
+  await qwenModelFormRef.value.validate(async (valid) => {
+    if (valid) {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(qwenModelForm)
+      })
+      if (res.ok) {
+        ElMessage.success('添加成功')
+        addQwenModelDialogVisible.value = false
+        fetchModels()
+      } else {
+        ElMessage.error('添加失败')
+      }
+    }
+  })
 }
 
 onMounted(() => {
